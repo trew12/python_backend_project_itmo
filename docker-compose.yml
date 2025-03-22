@@ -1,0 +1,98 @@
+version: '3.8'
+services:
+  app:
+    build:
+      dockerfile: app.Dockerfile
+    container_name: sales-app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - kafka
+      - kafka-setup
+      - worker
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0"]
+
+  worker:
+    build:
+      dockerfile: worker.Dockerfile
+    container_name: sales-worker
+    command: ["python", "-m", "worker.consumer"]
+    depends_on:
+      - db
+      - kafka
+      - kafka-setup
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  db:
+    image: postgres:13
+    container_name: sales-db
+    restart: always
+    environment:
+      POSTGRES_DB: salesdb
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.8.0
+    container_name: kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENERS: PLAINTEXT://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.8.0
+    container_name: kafka-setup
+    depends_on:
+      - kafka
+    command: [
+      "kafka-topics",
+      "--bootstrap-server", "kafka:9092",
+      "--create",
+      "--if-not-exists",
+      "--topic", "forecast_requests",
+      "--replication-factor", "1",
+      "--partitions", "1"
+    ]
+
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: yes
+    ports:
+      - "2181:2181"
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    hostname: grafana
+    user: "472"
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/datasource.yml:/etc/grafana/provisioning/datasource.yml
+
